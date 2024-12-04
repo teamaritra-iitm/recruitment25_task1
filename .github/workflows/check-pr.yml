@@ -1,9 +1,9 @@
-name: Check Answer and Update Leaderboard
+name: Validate and Update Leaderboard
 
 on:
   pull_request:
     paths:
-      - "answer.yaml" # Trigger only if this file is modified
+      - "*_task1.yaml"  # Trigger for any task submission file
 
 jobs:
   validate-and-update:
@@ -12,69 +12,26 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v3
-      
-    - name: Validate `answer.yaml`
-      id: validate
+
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.x"
+
+    - name: Install Dependencies
       run: |
-        # Path to the correct answer file
-        CORRECT_ANSWERS="correct_answers.yaml"
+        python -m pip install pyyaml
 
-        # Check if `answer.yaml` exists
-        if [[ ! -f answer.yaml ]]; then
-          echo "Error: answer.yaml not found."
-          exit 1
-        fi
-
-        # Compare the answers
-        CORRECT_COUNT=0
-        TOTAL_COUNT=$(yq e '. | length' $CORRECT_ANSWERS)
-        while IFS= read -r key; do
-          expected=$(yq e ".$key" $CORRECT_ANSWERS)
-          submitted=$(yq e ".$key" answer.yaml)
-          if [[ "$expected" == "$submitted" ]]; then
-            ((CORRECT_COUNT++))
-          fi
-        done < <(yq e 'keys' $CORRECT_ANSWERS)
-
-        echo "correct_count=$CORRECT_COUNT" >> $GITHUB_ENV
-        echo "total_count=$TOTAL_COUNT" >> $GITHUB_ENV
-
-    - name: Get Roll Number
-      id: get_roll
+    - name: Validate Submission and Update Leaderboard
       run: |
-        ROLL_NO=$(yq e '.roll_number' answer.yaml)
-        if [[ -z "$ROLL_NO" ]]; then
-          echo "Error: roll_number not specified in answer.yaml."
-          exit 1
-        fi
-        echo "roll_no=$ROLL_NO" >> $GITHUB_ENV
+        # Find the submitted file (assuming only one such file is submitted per PR)
+        FILE=$(ls *_task1.yaml)
+        python validate_submission.py "$FILE"
 
-    - name: Update Folder and Leaderboard
+    - name: Commit Changes
       run: |
-        ROLL_NO=${{ env.roll_no }}
-        CORRECT_COUNT=${{ env.correct_count }}
-        TOTAL_COUNT=${{ env.total_count }}
-
-        mkdir -p task1/$ROLL_NO
-        cp answer.yaml task1/$ROLL_NO/
-
-        # Update leaderboard.yaml
-        LEADERBOARD="leaderboard.yaml"
-        if [[ ! -f $LEADERBOARD ]]; then
-          echo "leaderboard: []" > $LEADERBOARD
-        fi
-
-        yq e -i ".leaderboard += [{roll_no: \"$ROLL_NO\", score: \"$CORRECT_COUNT/$TOTAL_COUNT\"}]" $LEADERBOARD
-
-        # Commit changes
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
-        git add task1/$ROLL_NO leaderboard.yaml
-        git commit -m "Updated leaderboard and added folder for roll no $ROLL_NO"
+        git add task1/ leaderboard.yaml
+        git commit -m "Updated leaderboard and task folder for $FILE"
         git push
-
-    - name: Deploy to GitHub Pages
-      if: github.event.pull_request.merged == true
-      run: |
-        # Optional: Generate and deploy leaderboard to GitHub Pages
-        echo "Generate static HTML for leaderboard"
